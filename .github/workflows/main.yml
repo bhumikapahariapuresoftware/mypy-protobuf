@@ -13,12 +13,7 @@ jobs:
     strategy:
       matrix:
         # Running mypy-protobuf itself
-        py-ver-mypy-protobuf: [
-            3.7.12,
-            3.8.12,
-            3.9.9,
-            3.10.1,
-        ]
+        py-ver-mypy-protobuf: [ 3.8.12 ]
     steps:
       - uses: actions/checkout@v2
       - name: Read version numbers
@@ -87,32 +82,36 @@ jobs:
         with:
           version: "${{ steps.read_versions.outputs.PYRIGHT_VERSION }}"
 
-  black:
-    name: Black formatting
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions/setup-python@v2
-      - name: Run black
-        run: |
-          pip3 install black
-          black --check .
-
-  sanity_check_windows:
-    name: Sanity Check Windows Executable
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions/setup-python@v2
-      - name: Read versions
-        run: echo ::set-output name=PROTOBUF_VERSION::$(grep "^protobuf>=" test_requirements.txt | cut -f2 -d=)
-        id: read_versions
-      - name: Install Protoc
-        uses: arduino/setup-protoc@v1
-        with:
-          version: "${{ steps.read_versions.outputs.PROTOBUF_VERSION }}"
-      - name: Run Protoc
-        run: |
-          pip3 install -e .
-          mkdir wintestout
-          protoc --python_out=wintestout --mypy_out=wintestout proto\mypy_protobuf\extensions.proto
+  run_test_arm64:
+      name: Build and Test for arm64
+      runs-on: ubuntu-20.04
+      steps:
+        - uses: actions/checkout@v2
+        - name: Set up QEMU
+          id: qemu
+          uses: docker/setup-qemu-action@v1
+        - name: Install and Run tests
+          run: |
+            docker run --rm -v ${{ github.workspace }}:/ws:rw --workdir=/ws \
+              arm64v8/ubuntu:20.04 \
+              bash -exc 'apt-get update && apt install -y python3 python3-pip make build-essential libssl-dev zlib1g-dev vim wget curl git zip unzip git-core gcc llvm libncurses5-dev libffi-dev liblzma-dev libbz2-dev libreadline-dev libsqlite3-dev libncursesw5-dev python-openssl xz-utils dos2unix && \
+              ln -fs /usr/share/zoneinfo/America/New_York /etc/localtime && export DEBIAN_FRONTEND=noninteractive && apt-get install -y tzdata && dpkg-reconfigure --frontend noninteractive tzdata && \
+              git clone https://github.com/pyenv/pyenv.git $HOME/.pyenv && \
+              touch $HOME/.bashrc && \
+              export PYENV_ROOT="$HOME/.pyenv" >> $HOME/.bashrc && \
+              export PATH="$PYENV_ROOT/bin:$PATH" >> $HOME/.bashrc && \
+              if command -v pyenv 1>/dev/null 2>&1; then eval "$(pyenv init -)" ; fi >> $HOME/.bashrc && \
+              git clone https://github.com/yyuu/pyenv-virtualenv.git   $HOME/.pyenv/plugins/pyenv-virtualenv && \
+              source $HOME/.bashrc && \
+              pyenv install 3.8.11 && \
+              pyenv global 3.8.11 && \
+              pyenv virtualenv 3.8.11 venv_project1 && \
+              pyenv versions && \
+              pip3 install enum34 aenum && \
+              export PATH="$HOME/.pyenv/bin:$PATH" && \
+              eval "$(pyenv init -)" && \
+              eval "$(pyenv init --path)" && \ 
+              eval "$(pyenv virtualenv-init -)" && \
+              ./run_test.sh && \
+              source deactivate && \
+              deactivate'
