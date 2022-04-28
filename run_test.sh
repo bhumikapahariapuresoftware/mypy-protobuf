@@ -2,15 +2,32 @@
 
 RED="\033[0;31m"
 NC='\033[0m'
-PROTOC=${PROTOC:=protoc}
+if [ `uname -m` == "aarch64" ]; then
+    PROTOC_ZIP=protoc-3.18.1-linux-aarch_64.zip
+    curl -OL https://github.com/protocolbuffers/protobuf/releases/download/v3.18.1/$PROTOC_ZIP
+    unzip -o $PROTOC_ZIP -d /usr/local bin/protoc
+    unzip -o $PROTOC_ZIP -d /usr/local include/*
+    PROTOC=${PROTOC:=protoc}
+    echo $PROTOC
+    echo $protoc
+    PY_VER_MYPY_PROTOBUF=${PY_VER_MYPY_PROTOBUF:=3.8.11}
+    PY_VER_MYPY_PROTOBUF_SHORT=$(echo $PY_VER_MYPY_PROTOBUF | cut -d. -f1-2)
+    PY_VER_MYPY=${PY_VER_MYPY:=3.8.11}
+    PY_VER_UNIT_TESTS="${PY_VER_UNIT_TESTS_3:=3.8.11}"
+    pip install enum34 aenum
+    PROTOC_ARGS="--proto_path=proto/ --experimental_allow_proto3_optional"
+    GRPC_PROTOS=$(find proto/testproto/grpc -name "*.proto")
+else
+    PROTOC=${PROTOC:=protoc}
+    PY_VER_MYPY_PROTOBUF=${PY_VER_MYPY_PROTOBUF:=3.8.11}
+    PY_VER_MYPY_PROTOBUF_SHORT=$(echo $PY_VER_MYPY_PROTOBUF | cut -d. -f1-2)
+    PY_VER_MYPY=${PY_VER_MYPY:=3.8.11}
+    PY_VER_UNIT_TESTS="${PY_VER_UNIT_TESTS_3:=3.8.11}"
+    PROTOC_ARGS="--proto_path=proto/ --experimental_allow_proto3_optional"
+    GRPC_PROTOS=$(find proto/testproto/grpc -name "*.proto")
 
-PY_VER_MYPY_PROTOBUF=${PY_VER_MYPY_PROTOBUF:=3.10.1}
-PY_VER_MYPY_PROTOBUF_SHORT=$(echo $PY_VER_MYPY_PROTOBUF | cut -d. -f1-2)
-PY_VER_MYPY=${PY_VER_MYPY:=3.8.11}
-PY_VER_UNIT_TESTS="${PY_VER_UNIT_TESTS_3:=3.8.11}"
+fi
 
-PROTOC_ARGS="--proto_path=proto/ --experimental_allow_proto3_optional"
-GRPC_PROTOS=$(find proto/testproto/grpc -name "*.proto")
 
 if [ -e $CUSTOM_TYPESHED_DIR ]; then
     export MYPYPATH=$CUSTOM_TYPESHED_DIR/stubs/protobuf
