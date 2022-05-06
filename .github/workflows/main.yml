@@ -13,18 +13,13 @@ jobs:
     strategy:
       matrix:
         # Running mypy-protobuf itself
-        py-ver-mypy-protobuf: [ 3.8.12 ]
+        py-ver-mypy-protobuf: [ 3.8.11 ]
     steps:
-      - uses: actions/checkout@v2
-      - name: Read version numbers
-        run: |
-          echo ::set-output name=PROTOBUF_VERSION::$(grep "^protobuf>=" test_requirements.txt | cut -f2 -d=)
-          echo ::set-output name=PYRIGHT_VERSION::$(grep '"pyright"' .github/package.json | cut -d\" -f4)
-        id: read_versions
       - name: Install Protoc
         uses: arduino/setup-protoc@v1
         with:
-          version: "${{ steps.read_versions.outputs.PROTOBUF_VERSION }}"
+          version: '3.18.1'
+      - uses: actions/checkout@v2
       - name: Cache pyenv
         uses: actions/cache@v2
         with:
@@ -53,12 +48,10 @@ jobs:
             rm -rf ~/.pyenv
             curl https://pyenv.run | bash
           fi
-
           export PATH="$HOME/.pyenv/bin:$PATH"
           eval "$(pyenv init -)"
           eval "$(pyenv init --path)"
           eval "$(pyenv virtualenv-init -)"
-
           for PY in ${{matrix.py-ver-mypy-protobuf}} ${{env.PY_VER_MYPY}} ${{env.PY_VER_UNIT_TESTS_3}}; do
             if [ ! -e ~/.pyenv/versions/$PY ]; then
               pyenv install --skip-existing $PY
@@ -76,13 +69,38 @@ jobs:
           eval "$(pyenv init --path)"
           eval "$(pyenv virtualenv-init -)"
           ./run_test.sh
-
       - name: Run Pyright
         uses: jakebailey/pyright-action@v1
         with:
-          version: "${{ steps.read_versions.outputs.PYRIGHT_VERSION }}"
+          version: 1.1.171
 
-  run_test_arm64:
+  black:
+    name: Black formatting
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/setup-python@v2
+      - name: Run black
+        run: |
+          pip3 install black
+          black --check .
+  sanity_check_windows:
+    name: Sanity Check Windows Executable
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/setup-python@v2
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v1
+        with:
+          version: '3.18.1'
+      - name: Run Protoc
+        run: |
+          pip3 install -e .
+          mkdir wintestout
+          protoc --python_out=wintestout --mypy_out=wintestout proto\mypy_protobuf\extensions.proto
+  
+  arm64_job:
       name: Build and Test for arm64
       runs-on: ubuntu-20.04
       steps:
