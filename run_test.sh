@@ -28,6 +28,8 @@ else
 
 fi
 
+# Clean out generated/ directory - except for .generated / __init__.py
+find test/generated -type f -not \( -name "*.expected" -or -name "__init__.py" \) -delete
 
 if [ -e $CUSTOM_TYPESHED_DIR ]; then
     export MYPYPATH=$CUSTOM_TYPESHED_DIR/stubs/protobuf
@@ -87,29 +89,23 @@ MYPY_PROTOBUF_VENV=venv_$PY_VER_MYPY_PROTOBUF
     source $MYPY_PROTOBUF_VENV/bin/activate
 
     # Confirm version number
-    test "$(protoc-gen-mypy -V)" = "mypy-protobuf 3.2.0"
-    test "$(protoc-gen-mypy --version)" = "mypy-protobuf 3.2.0"
-    test "$(protoc-gen-mypy_grpc -V)" = "mypy-protobuf 3.2.0"
-    test "$(protoc-gen-mypy_grpc --version)" = "mypy-protobuf 3.2.0"
+    test "$(protoc-gen-mypy -V)" = "mypy-protobuf 3.0.0"
+    test "$(protoc-gen-mypy --version)" = "mypy-protobuf 3.0.0"
 
     # Run mypy on mypy-protobuf internal code for developers to catch issues
     FILES="mypy_protobuf/main.py"
-    $MYPY_VENV/bin/mypy --custom-typeshed-dir=$CUSTOM_TYPESHED_DIR --python-executable=$MYPY_PROTOBUF_VENV/bin/python3 --python-version=$PY_VER_MYPY_PROTOBUF_SHORT $FILES
+    $MYPY_VENV/bin/mypy --strict --custom-typeshed-dir=$CUSTOM_TYPESHED_DIR --python-executable=$MYPY_PROTOBUF_VENV/bin/python3 --python-version=$PY_VER_MYPY_PROTOBUF_SHORT --pretty --show-error-codes $FILES
 
     # Generate protos
     python --version
     $PROTOC --version
-    expected="libprotoc 3.19.4"
+    expected="libprotoc 3.18.1"
     if [[ $($PROTOC --version) != $expected ]]; then
         echo -e "${RED}For tests - must install protoc version ${expected} ${NC}"
         exit 1
     fi
 
-    # CI Check to make sure generated files are committed
-    SHA_BEFORE=$(find test/generated -name "*.pyi" | xargs sha1sum)
-    # Clean out generated/ directory - except for __init__.py
-    find test/generated -type f -not -name "__init__.py" -delete
-
+    PROTOC_ARGS="--proto_path=proto/ --experimental_allow_proto3_optional"
     # Compile protoc -> python
     $PROTOC $PROTOC_ARGS --python_out=test/generated `find proto -name "*.proto"`
 
@@ -125,42 +121,37 @@ MYPY_PROTOBUF_VENV=venv_$PY_VER_MYPY_PROTOBUF
     # Overwrite w/ run with mypy-protobuf without flags
     $PROTOC $PROTOC_ARGS --mypy_out=test/generated `find proto -name "*.proto"`
 
-    # Generate grpc protos
+    # Compile GRPC
+    GRPC_PROTOS=$(find proto/testproto/grpc -name "*.proto")
     $PROTOC $PROTOC_ARGS --mypy_grpc_out=test/generated $GRPC_PROTOS
-
-    if [[ -n $VALIDATE ]] && ! diff <(echo "$SHA_BEFORE") <(find test/generated -name "*.pyi" | xargs sha1sum); then
-        echo -e "${RED}Some .pyi files did not match. Please commit those files${NC}"
-        exit 1
-    fi
+    python -m grpc_tools.protoc $PROTOC_ARGS --grpc_python_out=test/generated $GRPC_PROTOS
 )
 
 for PY_VER in $PY_VER_UNIT_TESTS; do
     UNIT_TESTS_VENV=venv_$PY_VER
     PY_VER_MYPY_TARGET=$(echo $PY_VER | cut -d. -f1-2)
 
-    # Generate GRPC protos for mypy / tests
-    (
-        source $UNIT_TESTS_VENV/bin/activate
-        python -m grpc_tools.protoc $PROTOC_ARGS --grpc_python_out=test/generated $GRPC_PROTOS
-    )
-
     # Run mypy on unit tests / generated output
     (
         source $MYPY_VENV/bin/activate
 
         # Run mypy
-        FILES="test/"
-        mypy --custom-typeshed-dir=$CUSTOM_TYPESHED_DIR --python-executable=$UNIT_TESTS_VENV/bin/python --python-version=$PY_VER_MYPY_TARGET $FILES
-        # PYTHONPATH=test/generated MYPYPATH=$MYPYPATH:test/generated python3 -m mypy.stubtest --custom-typeshed-dir=$CUSTOM_TYPESHED_DIR --allowlist stubtest_allowlist.txt testproto
+       
+        FILES38="test/"
+        FILES=$FILES38
+        
+        mypy --strict --custom-typeshed-dir=$CUSTOM_TYPESHED_DIR --python-executable=$UNIT_TESTS_VENV/bin/python --python-version=$PY_VER_MYPY_TARGET --pretty --show-error-codes $FILES
 
         # run mypy on negative-tests (expected mypy failures)
-        NEGATIVE_FILES="test_negative/negative.py test_negative/negative_3.8.py $FILES"
-
+       
+        NEGATIVE_FILES_38="test_negative/negative.py test_negative/negative_3.8.py $FILES38"
+        NEGATIVE_FILES=$NEGATIVE_FILES_38
+        
         MYPY_OUTPUT=`mktemp -d`
         call_mypy() {
             # Write output to file. Make variant w/ omitted line numbers for easy diffing / CR
             PY_VER_MYPY_TARGET=$(echo $1 | cut -d. -f1-2)
-            mypy --custom-typeshed-dir=$CUSTOM_TYPESHED_DIR --python-executable=venv_$1/bin/python --python-version=$PY_VER_MYPY_TARGET ${@: 2} > $MYPY_OUTPUT/mypy_output || true
+            mypy --strict --custom-typeshed-dir=$CUSTOM_TYPESHED_DIR --python-executable=venv_$1/bin/python --python-version=$PY_VER_MYPY_TARGET ${@: 2} > $MYPY_OUTPUT/mypy_output || true
             cut -d: -f1,3- $MYPY_OUTPUT/mypy_output > $MYPY_OUTPUT/mypy_output.omit_linenos
         }
 
@@ -169,7 +160,8 @@ for PY_VER in $PY_VER_UNIT_TESTS; do
             echo -e "${RED}test_negative/output.expected.$PY_VER_MYPY_TARGET didnt match. Copying over for you. Now rerun${NC}"
 
             # Copy over all the mypy results for the developer.
-            call_mypy 3.8.11 $NEGATIVE_FILES
+            
+            call_mypy 3.8.11 $NEGATIVE_FILES_38
             cp $MYPY_OUTPUT/mypy_output test_negative/output.expected.3.8
             cp $MYPY_OUTPUT/mypy_output.omit_linenos test_negative/output.expected.3.8.omit_linenos
             exit 1
@@ -177,8 +169,9 @@ for PY_VER in $PY_VER_UNIT_TESTS; do
     )
 
     (
-        # Run unit tests.
+        # Run unit tests. These tests generate .expected files
         source $UNIT_TESTS_VENV/bin/activate
-        PYTHONPATH=test/generated py.test --ignore=test/generated -v
+        if [[ $PY_VER =~ ^2.* ]]; then IGNORE="--ignore=test/test_grpc_usage.py"; else IGNORE=""; fi
+        PYTHONPATH=test/generated py.test --ignore=test/generated $IGNORE -v
     )
 done
